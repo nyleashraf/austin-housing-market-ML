@@ -34,7 +34,7 @@ def time_proxy(ip_addr, port, proxy_user=None, proxy_pass=None,  url='https://ww
    
     for i in range(TOTAL_TRIES_PER_URL):
         try:
-            r = requests.get(url, proxies=pull_proxies, headers={'User-agent': ua.chrome}, timeout=timeout)
+            r = requests.get(url, proxies=pull_proxies, headers={'User-agent': ua.chrome}, timeout=30)
             if r.status_code == 200:
                 success_counts += 1
         except Exception:
@@ -83,7 +83,7 @@ def get_page_info(url_and_proxies):
             proxy = construct_proxy(proxy_element[1], proxy_element[2])
             # LOGGER.info('Using {} proxy'.format(proxy))
             print('Using {} proxy'.format(proxy))
-            resp = session.get(url, headers=HEADER, proxies=proxy)
+            resp = session.get(url, headers=HEADER, proxies=proxy, timeout=timeout)
             resp.raise_for_status()
             # LOGGER.info('Got {} status code.'.format(resp.status_code))
             print('Got {} status code.'.format(resp.status_code))
