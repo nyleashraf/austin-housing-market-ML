@@ -40,6 +40,46 @@ def create_tables_if_not_exist():
              TYPE           TEXT,
              PRICE          REAL
              );''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS LISTING_DETAILS
+            (
+            URL                       TEXT    NOT NULL,
+            ADDRESS                   TEXT    NOT NULL,
+            LOCALITY                  TEXT    NOT NULL,
+            REGION                    TEXT    NOT NULL,
+            POSTAL CODE               TEXT    NOT NULL,
+            PRICE                     TEXT    NOT NULL,
+            NUMBER_OF_BEDS            INT,
+            NUMBER_OF_BATHS           INT,
+            WALK_SCORE                INT,
+            TRANSIT_SCORE             INT,
+            BIKE_SCORE                INT,
+            SCHOOL1_TITLE             TEXT,
+            SCHOOL1_DISTANCE          TEXT,
+            SCHOOL1_RATING            INT,
+            SCHOOL2_TITLE             TEXT,
+            SCHOOL2_DISTANCE          TEXT,
+            SCHOOL2_RATING            INT,
+            SCHOOL3_TITLE             TEXT,
+            SCHOOL3_DISTANCE          TEXT,
+            SCHOOL3_RATING            INT,
+            NUMBER_OF_DINING_ROOMS    INT,
+            NUMBER_OF_LIVING_ROOMS    INT,
+            NUMBER_OF_OTHER_ROOMS     INT,
+            DINING_ROOM_DESCRIPTION   TEXT,
+            KITCHEN_FEATURES          TEXT,
+            KITCHEN_APPLIANCES        TEXT,
+            SCHOOL_DISTRICT           TEXT,
+            NUMBER_OF_PARKING_SPACES  INT,
+            PARKING_FEATURES          TEXT,
+            YEAR_BUILT                TEXT,
+            NUMBER_OF_FIREPLACES      INT,
+            HOA                       TEXT,
+            HOA_DUES                  TEXT,
+            POOL                      TEXT,
+            POOL_FEATURES             TEXT,
+            NUMBER_OF_STORIES         INT,
+            AREA_AMENITIES            TEXT
+            );''')
     conn.close()
 
 def construct_proxy(ip_addr, port):
@@ -154,7 +194,6 @@ def url_partition(base_url, proxies, max_levels=6, LOGGER = None):
     num_levels = 0
     partitioned_urls = []
     while urls and (num_levels < max_levels):
-#         rand_move = random.randint(0, len(proxies) - 1)
         partition_inputs = []
         for url in urls:
             # proxy = construct_proxy(*proxies[(rand_move + i) % len(proxies)][1:3])
@@ -163,13 +202,8 @@ def url_partition(base_url, proxies, max_levels=6, LOGGER = None):
 
         scraper_results = []
         with ProcessPoolExecutor(max_workers=min(50, len(partition_inputs))) as executor:
-            # must pass in the two args for get_page_info: url and list of all proxies
-            # in order for map function to work as expected, need to pass in list of all urls
-            # list takes form [[url1, (proxy1, proxy2, ...)], [url2, (proxy1, proxy2, ...)], ...]
             scraper_results = list(executor.map(get_page_info, partition_inputs))
 
-        # LOGGER.info('Getting {} results'.format(len(scraper_results)))
-        # LOGGER.info('Results: {}'.format(scraper_results))
         print('Getting {} results'.format(len(scraper_results)))
         print('Results: {}'.format(scraper_results))
 
@@ -216,9 +250,6 @@ def url_partition(base_url, proxies, max_levels=6, LOGGER = None):
         time.sleep(random.randint(2, 5))
     # return partitioned_urls
 
-# -------------------------------------- START WORKING SPACE --------------------------------------
-
-# list returned from url_partition must be passed in as argument since we're not include DB functionality rn 
 def get_paginated_urls(prefix):
     # Return a set of paginated urls with at most 20 properties each.
     paginated_urls = []
@@ -248,6 +279,159 @@ def get_paginated_urls(prefix):
                 urls = ['{},sort=lo-price/page-{}'.format(url, p) for p in range(1, num_pages + 1)]
             paginated_urls.extend(urls)
     return list(set(paginated_urls))
+
+def partition_into_individual_homes(paginated_url_and_proxies):
+    """Function to convert paginated urls to home-specific urls.
+    Currently not in use.
+    """
+
+    url, proxies = url_and_proxies
+    random.shuffle(proxies)
+    proxy_pool = cycle(proxies)
+    time.sleep(random.random() * 16)
+    num_proxies = len(proxies)
+    count = 0
+    url_list = []
+
+    while count <= len(proxies):
+        try:
+            proxy_element = next(proxy_pool)
+            proxy = construct_proxy(proxy_element[1], proxy_element[2])
+            session = requests.Session()
+            resp = session.get(url, headers=HEADER, proxies = proxy, timeout=30)
+            resp.raise_for_status()
+            print('Got {} status code.'.format(resp.status_code))
+
+            if resp.status_code == 200:
+                bf = BeautifulSoup(resp.text, 'lxml')
+                for link in bf.find_all('a'):
+                    if type(link.get('href')) is str and link.get('href').startswith('/TX/Austin/'):
+                        url_list.append(link.get('href'))
+                return url_list
+        except Exception as e:
+            print('Swallowing exception {} on url {}'.format(e, url))
+            count += 1
+            continue
+
+def scrape_home_info(url_and_proxies):
+    """Function to pull specific information from a given home listing
+    on redfin.com. 
+    """
+    url, proxies = url_and_proxies
+    # LOGGER.info('Requesting {} url'.format(url))
+    print('Requesting {} url'.format(url))
+    random.shuffle(proxies)
+    proxy_pool = cycle(proxies)
+
+    time.sleep(random.random() * 10)
+    session = requests.Session()
+    count = 0
+    num_proxies = len(proxies)
+
+    home_features = ['# of Beds', '# of Baths', '# of Dining Rooms', '# of Living Rooms',\
+                'Other Rooms', 'Dining Room Description', 'Kitchen Features', \
+                'Kitchen Appliances', 'School District', '# of Parking Spaces', \
+                'Parking Features', 'Year Built', '# of Fireplaces', 'Has HOA', \
+                'HOA Dues', 'Has Pool', 'Pool Features', '# of Stories', 'Area Amenities']
+
+    HEADER = {
+        'User-agent': 'Chrome'
+    }
+
+    while count <= num_proxies:
+        try:
+            proxy_element = next(proxy_pool)
+            proxy = construct_proxy(proxy_element[1], proxy_element[2])
+            session = requests.Session()
+            resp = session.get(url, headers=HEADER, timeout=30)
+            resp.raise_for_status()
+            print('Got {} status code.'.format(resp.status_code))
+
+            if resp.status_code == 200:
+                bf = BeautifulSoup(resp.text, 'lxml')
+                print('Scraping {} with proxy {}'.format(url, proxy))
+                # pull basic home information
+                address_div = bf.find('h1', {'class': 'address inline-block'})
+                address = address_div.find('span', {'class': 'street-address'}).text 
+                locality = address_div.find('span', {'class': 'locality'}).text 
+                region = address_div.find('span', {'class': 'region'}).text 
+                postal = address_div.find('span', {'class': 'postal-code'}).text 
+                redfin_price_description_div = bf.find('div', {'class': 'info-block price'})
+                redfin_estimate = redfin_price_description_div.find('div', {'class': 'statsValue'}).text
+                beds_div = bf.find('div', {'class': 'info-block', 'data-rf-test-id': 'abp-beds'})
+                num_beds = beds_div.find('div', {'class': 'statsValue'}).text
+                baths_div = bf.find('div', {'class': 'info-block', 'data-rf-test-id': 'abp-baths'})
+                num_baths = baths_div.find('div', {'class': 'statsValue'}).text
+                running_list = [address, locality, region, postal, redfin_estimate, num_beds, num_baths]
+                # find transportation scores for home
+                walking_div = bf.find('div', {'class': 'transport-icon-and-percentage walkscore'})
+                walkscore = walking_div.find('span', {'class': re.compile('value*')}).text
+                running_list.append(walkscore)
+                transit_div = bf.find('div', {'class': 'transport-icon-and-percentage transitscore'})
+                transitscore = transit_div.find('span', {'class': re.compile('value*')}).text
+                running_list.append(transitscore)
+                biking_div = bf.find('div', {'class': 'transport-icon-and-percentage bikescore'})
+                bikescore = biking_div.find('span', {'class': re.compile('value*')}).text
+                running_list.append(bikescore)
+                # find nearby school data for home
+                for element in bf.find_all('tr', {'class': 'schools-table-row'}):
+                    school_title = element.find('div', {'class': 'school-title'}).text
+                    school_distance = element.find('div', {'class': 'value'}).text
+                    school_rating = element.find('span', {'class': 'rating-num'}).text
+                    running_list.extend((school_title, school_distance, school_rating))
+                # pull data from the listing details container
+                for feature in home_features:
+                    appended = False
+                    for element in bf.find_all('span', {'class': 'entryItemContent'}):
+                        if ':' in element.text:
+                            if feature in element.text.split(':')[0]:
+                                running_list.append(element.text.split(':')[1].strip())
+                                appended = True
+                        else:
+                            if feature in element.text:
+                                running_list.append(element.text)
+                                appended = True
+                    if appended == False:
+                        running_list.append('NULL')
+                return running_list
+        except Exception as e:
+            print('failed for url {}, proxy {}'.format(url, proxy))
+            print('Exception: {}'.format(e))
+            count += 1
+            continue
+
+def get_home_urls(proxies):
+    """Utilize scrape_home_info function to retrieve home-specific data
+    for all sold homes + active listings in the Austin area.
+    Currently set up to pull urls from the active listings table.
+    """
+    scrape_inputs = []
+    with sqlite3.connect(SQLITE_DB_PATH) as db:
+        cursor = db.execute("""
+            SELECT URL
+            FROM LISTING_DETAILS
+        """)
+        for url_tail in cursor:
+            redfin_url = 'https://www.redfin.com' + ''.join(url_tail)
+            scrape_inputs.append((redfin_url, proxies))
+    
+    scraper_results = []
+    with ProcessPoolExecutor(max_workers=min(50, len(scrape_inputs))) as executor:
+        scraper_results = list(executor.map(scrape_home_info, scrape_inputs))
+    
+    with sqlite3.connect(SQLITE_DB_PATH) as db:
+        cursor = db.cursor()
+        cursor.execute("""
+            INSERT INTO LISTING_DETAILS (URL, ADDRESS, LOCALITY, REGION, POSTAL_CODE, PRICE, NUMBER_OF_BEDS, NUMBER_OF_BATHS,
+                                        WALK_SCORE, TRANSIT_SCORE, BIKE_SCORE, SCHOOL1_TITLE, SCHOOL1_DISTANCE, SCHOOL1_RATING,
+                                        SCHOOL2_TITLE, SCHOOL2_DISTANCE, SCHOOL2_RATING, SCHOOL3_TITLE, SCHOOL3_DISTANCE, 
+                                        SCHOOL3_RATING, NUMBER_OF_DINING_ROOMS, NUMBER_OF_LIVING_ROOMS, NUMBER_OF_OTHER_ROOMS,
+                                        DINING_ROOM_DESCRIPTION, KITCHEN_FEATURES, KITCHEN_APPLIANCES, SCHOOL_DISTRICT,
+                                        NUMBER_OF_PARKING_SPACES, PARKING_FEATURES, YEAR_BUILT, NUMBER_OF_FIREPLACES,
+                                        HOA, HOA_DUES, POOL, POOL_FEATURES, NUMBER_OF_STORIES, AREA_AMENITIES)
+            VALUES {};
+        """.format(','.join(scraper_results)))
+    
 
 # will need to change logic to run through random proxies until successful connection is made 
 def scrape_page(url_and_proxies):
@@ -387,11 +571,23 @@ def parse_addresses():
             # LOGGER.info(e)
             print(e)
 
-# -------------------------------------- END WORKING SPACE --------------------------------------
+def get_home_info(proxies):
+
+    url_and_proxies = []
+
+    with sqlite3.connect(SQLITE_DB_PATH) as db:
+        cursor = db.execute("""
+            SELECT URL
+            FROM LISTING_DETAILS
+        """)
+        for url_tail in cursor:
+            home_url = 'https://www.redfin.com' + url_tail
+            url_and_proxies.append((home_url, proxies))
+        
 
 if __name__ == '__main__':
     # base_url = 'https://www.redfin.com/city/1362/CA/Belmont/filter/include=sold-3yr'
-    base_url = 'https://www.redfin.com/city/30818/TX/Austin/filter/include=sold-3yr'
+    base_url = 'https://www.redfin.com/city/30818/TX/Austin/filter/include=forsale+mlsfsbo+construction+fsbo+sold-3yr'
 
     SQLITE_DB_PATH = 'redfin-scraper-data.db'
 
@@ -407,8 +603,9 @@ if __name__ == '__main__':
     proxies = pd.read_csv(proxy_csv_path, encoding='utf-8').values
     proxies = proxies.tolist()
 
-    url_partition(base_url, proxies)
-    crawl_redfin_with_proxies(proxies)
-    parse_addresses()
+    # url_partition(base_url, proxies)
+    # crawl_redfin_with_proxies(proxies)
+    # parse_addresses()
+    get_home_urls(proxies)
     # urls_df = pd.DataFrame(urls, columns = ['URL', 'NUM_PROPERTIES', 'NUM_PAGES', 'PER_PAGE_PROPERTIES'])
     # print(urls_df)
